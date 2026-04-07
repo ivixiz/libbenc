@@ -172,10 +172,10 @@ int main(void){
     oled.clear();
     oled.home();
     //if(enc.holding() || enc.press()){i++;}
-    if(enc.left()){i += enc.step(i); }else if(enc.right()){ i-= enc.step(i);}
+    if(enc.left()){i += enc.fstep(i); }else if(enc.right()){ i-= enc.fstep(i);}
     oled.printf("i=%d",i);
-    if(enc.turn()){oled.printf("%s%d",enc.dir() == 1 ? "-":"+",enc.step());}
-    if(enc.Hold()){i++;}
+    if(enc.turn()){oled.printf("%s%d",enc.dir() == 1 ? "-":"+",enc.fstep());}
+    if(enc.Hold() && enc.dir() > 0){i--;}else if(enc.Hold()){i++;}
     oled.setCursor(0, 8);
     oled.printf("FPS=%d",fps());
     oled.update();
