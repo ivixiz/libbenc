@@ -1,6 +1,6 @@
  
 # LibBEnc – Encoder & Button Control Library
-**LibBEnc** is a single-file, header-only library for handling rotary encoders and buttons with advanced features, including interrupt support, debouncing, multiple click detection, step events, and timeout management. It is optimized for **STM32**, **AVR/Arduino**, **ESP8266**, and **ESP32** platforms.
+**LibBEnc** is a simple, single-file library for handling rotary encoders and buttons with advanced features, including interrupt support, debouncing, multiple click detection, step events, and timeout management. It is optimized for **STM32**, **AVR/Arduino**, **ESP8266**, and **ESP32** platforms.
 ---
 STM32 support extended and based on EncButton [GitHub](https://github.com/GyverLibs/EncButton)
 More detailed instructions see there.
@@ -159,7 +159,7 @@ void loop(){
 * Also multiple button press in MultiButton class.
 ### EncoderButton (`VirtEncoder`)
 * **Events:** `turn()`,`turnH()`,`right()`,`left()`,`rightH()`,`leftH()`
-* **States:** `dir()`,`step()`,`fast()`,`Hold()`
+* **States:** `dir()`,`fast()`,`fstep()`,`fstepRaw()`,`Hold()`
 * **Configuration:** `setEncReverse()`, `setEncType()`, `setEncISR()`, `initEnc()`, `clear()`
 
 
