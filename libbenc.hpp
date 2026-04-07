@@ -1553,10 +1553,10 @@ class VirtEncButton : public VirtButton, public VirtEncoder {
     /** @brief Get the action as EBAction type. @return Event code for turn or button [event]. */
     EBAction getAction(){ return (EBAction)action();                                  } // было действие с кнопки или энкодера, вернёт код события [событие]
     /** @brief Get the current fast step value (linear or lookup). @return Step multiplier based on rotation speed [state]. */
-    uint8_t stepRaw() { return _faststep; } // чем быстрее поворот, тем больше значение (квадратично)
+    uint8_t fstepRaw() { return _faststep; } // чем быстрее поворот, тем больше значение (квадратично)
     static constexpr size_t faststeps_count = sizeof(faststeps)/sizeof(faststeps[0]);// вычисляем безопасный индекс на этапе компиляции
     /** @brief Get the current fast step value from table. @return Step multiplier based on rotation speed [state]. */
-    uint16_t step() {
+    uint16_t fstep() {
         constexpr auto max_index = faststeps_count - 1;
         size_t idx = _faststep > max_index ? max_index : _faststep;
         return faststeps[idx];
@@ -1565,7 +1565,7 @@ class VirtEncButton : public VirtButton, public VirtEncoder {
         @param var target variable to change value by encoder
         @param trig trig value to switch between dependency on var and lookup table faststeps[](more precise!)
         @return Step multiplier based on rotation speed [state]. */
-    uint16_t step(int var, uint8_t trig = 2) {
+    uint16_t fstep(int var, uint8_t trig = 2) {
         constexpr auto max_index = faststeps_count - 1;
         size_t idx = _faststep > max_index ? max_index : _faststep; 
         return (_faststep > trig? var >> (max_index-_faststep) : faststeps[idx]);
