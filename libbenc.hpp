@@ -1,6 +1,5 @@
 /** @file           : libbenc.hpp
   * @brief          : Encoder-Button control library 
-  * @attention      : USE C++20 or newer due to template <Pin ENCA, Pin ENCB, Pin BTN, PinMode MENC, PinMode MBTN> to compile
   * @note           : Single file library
   
   * //| us(MHz) | digitalWrite | gio_write | gio_toggle | digitalRead | gio_read   | pinMode      | gio_mode   |
@@ -14,21 +13,134 @@
   * //| STM32Hx |      ?       |     ?     |     ?      |      ?      |     ?      |       ?      |     ?      |
   */
 
+/*//===USAGE======USAGE======USAGE======USAGE======USAGE===
+    //FOR STM32 Platform: declaration  (STM32G474 tested) ##########################
+    EncButtonT<// using template
+        Pin{GPIOB_BASE, GPIO_PIN_4}, 
+        Pin{GPIOB_BASE, GPIO_PIN_5}, 
+        Pin{GPIOB_BASE, GPIO_PIN_10}, 
+        PinMode{GPIO_PULLUP, GPIO_MODE_IT_RISING_FALLING}, 
+        PinMode{GPIO_PULLDOWN, GPIO_MODE_IT_RISING_FALLING}
+    > enc;
+
+    EncButton enc; // using constructor
+
+    int main(){
+        //after MX_GPIO_Init(); !!!
+        enc.init(); //if template
+
+        enc.init({GPIOB, GPIO_PIN_4}, //if contructor
+                {GPIOB, GPIO_PIN_5}, 
+                {GPIOB, GPIO_PIN_10},
+                {GPIO_PULLUP, GPIO_MODE_IT_RISING_FALLING}, 
+                {GPIO_PULLDOWN, GPIO_MODE_IT_RISING_FALLING});
+        int i = 0;
+        enc.setEncISR(true);
+        while (1){
+            enc.tick();//usage
+            if(enc.left()){i += enc.step(i); }else if(enc.right()){ i-= enc.step(i);} 
+
+        }
+    }
+    //somewhere below... 
+    void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin){
+        if(GPIO_Pin == GPIO_PIN_4 || GPIO_Pin == GPIO_PIN_5 || GPIO_Pin == GPIO_PIN_10){
+            enc.tickISR();
+        }
+    }
+
+    FOR ARDUINO AVR (Atmega328 tested) ####################################################
+    #define FASTSTEPS {1, 10, 20, 50, 100} //define your own multipliers of fast turn steps
+    #include <libbenc.hpp>
+    EncButton eb(EN_CLK,EN_DAT,EN_SW,INPUT,INPUT);// constructor
+
+    EncButtonT<EN_CLK,EN_DAT,EN_SW> eb; //template
+
+    ISR(PCINT0_vect) {
+    eb.tickISR();
+    }
+    void isr(){
+    eb.tickISR();
+    }
+    void setup(){
+        ...
+        attachInterrupt(1, isr, CHANGE);
+        PCICR |= (1 << PCIE0);
+        PCMSK0 |= (1 << PCINT2);  // pin 10
+        PCMSK0 |= (1 << PCINT4);  // pin 12
+        PCMSK0 |= (1 << PCINT0);
+        ...
+    }
+
+    void loop(){
+    eb.tick();//usage
+    ...
+    }
+
+
+*/
+
 #pragma once
+//1728kB
 //========================================== OPTIONS =======================================================
 #define EB_NO_FUNCTIONAL   //uncomment to disable std::function<void()> ActionHandler; in order to save ~5kB
-//#define EB_USE_CONSTRUCTOR //in order to dynamic change  pins or mode
-//#define GIO_WITH_SHIFT_HPP
+#define GIO_WITH_SHIFT_HPP
+
+#if defined(STM32WB)//detect platform
+    #define STM32
+    #include "stm32wbxx_hal.h"
+#elif defined(STM32F0)
+    #define STM32
+    #include "stm32f0xx_hal.h"
+#elif defined(STM32F1)
+    #define STM32
+    #include "stm32f1xx_hal.h"
+#elif defined(STM32F4)
+    #define STM32
+    #include "stm32f4xx_hal.h"
+#elif defined(STM32L0)
+    #define STM32
+    #include "stm32l0xx_hal.h"
+#elif defined(STM32L1)
+    #define STM32
+    #include "stm32l1xx_hal.h"
+#elif defined(STM32L4)
+    #define STM32
+    #include "stm32l4xx_hal.h"
+#elif defined(STM32L5)
+    #define STM32
+    #include "stm32l5xx_hal.h"
+#elif defined(STM32F3)
+    #define STM32
+    #include "stm32f3xx_hal.h"
+#elif defined(STM32H7)
+    #define STM32
+    #include "stm32h7xx_hal.h"
+#elif defined(STM32F7)
+    #define STM32
+    #include "stm32f7xx_hal.h"
+#elif defined(STM32G0)
+    #define STM32
+    #include "stm32g0xx_hal.h"
+#elif defined(STM32G4)
+    #define STM32
+    #include "stm32g4xx_hal.h"
+#elif defined(STM32C0)
+    #define STM32
+    #include "stm32c0xx_hal.h"
+#elif defined(STM32U5)
+    #define STM32
+    #include "stm32u5xx_hal.h"
+#endif
 
 #ifndef LIBBENC_HPP
 #define LIBBENC_HPP
     #define _GIO_INLINE static inline __attribute__((always_inline))
-    #define LSB_NORMAL  0b00
-    #define MSB_NORMAL  0b01
-    #define LSB_REVERSE 0b10
-    #define MSB_REVERSE 0b11
     #define AUTO           2
 
+    #ifndef FASTSTEPS
+        #define FASTSTEPS {1, 10, 100, 1000, 10000, 50000}
+    #endif
     
     #ifndef __AVR__
         #undef abs //abs is defined as macro and conflicts with abs() function
@@ -36,14 +148,8 @@
             #include <functional>
         #endif
     #endif
-
-    #ifndef STM32
-        #define greg_set(reg, mask) *reg |= mask
-        #define greg_clr(reg, mask) *reg &= ~mask
-        #define greg_write(reg, mask, val) (val) ? greg_set(reg, mask) : greg_clr(reg, mask)
-        #define greg_read(reg, mask) (bool)(*reg & mask)
-    #else 
-        #include "stm32g4xx_hal.h"
+   
+    #ifdef STM32
         #define LOW            0
         #define HIGH           1
         #define INPUT          GPIO_NOPULL
@@ -52,40 +158,43 @@
         
         _GIO_INLINE void     delay(uint32_t ms){ HAL_Delay(ms); }
         _GIO_INLINE uint32_t millis(void)      { return HAL_GetTick(); }
-    #endif //STM32
+        typedef struct Pin {
+            std::uintptr_t port{};
+            uint16_t n{};
 
-    
-    typedef struct Pin {
-    #ifdef STM32
-        std::uintptr_t port{};
-        uint16_t n{};
+            constexpr Pin() noexcept = default;
 
-        constexpr Pin() noexcept = default;
+            // для template / constexpr
+            constexpr Pin(std::uintptr_t baseAddr, uint16_t pin) noexcept
+                : port(baseAddr), n(pin) {}
+            // для runtime init({GPIOB, GPIO_PIN_4}, ...)
+            Pin(GPIO_TypeDef* p, uint16_t pin) noexcept
+                : port(reinterpret_cast<std::uintptr_t>(p)), n(pin) {}
+            constexpr bool operator==(const Pin&) const = default;
+            GPIO_TypeDef* gpio() const noexcept {
+                return reinterpret_cast<GPIO_TypeDef*>(port);
+            }
+            constexpr bool isValid() const noexcept {
+                    return port != 0 && n && ((n & (n - 1)) == 0);
+            }
+        } Pin;
 
-        // для template / constexpr
-        constexpr Pin(std::uintptr_t baseAddr, uint16_t pin) noexcept
-            : port(baseAddr), n(pin) {}
-        // для runtime init({GPIOB, GPIO_PIN_4}, ...)
-        Pin(GPIO_TypeDef* p, uint16_t pin) noexcept
-            : port(reinterpret_cast<std::uintptr_t>(p)), n(pin) {}
-        constexpr bool operator==(const Pin&) const = default;
-        GPIO_TypeDef* gpio() const noexcept {
-            return reinterpret_cast<GPIO_TypeDef*>(port);
-        }
-    #else
-        uint8_t n = 0;
-    #endif
-    } Pin;
-
-    typedef struct PinMode { 
-    #ifdef STM32
-        uint32_t io; //INPUT / OUTPUT / INPUT_PULLUP 
-        uint32_t it; //GPIO_MODE_XXXX
+        typedef struct PinMode { 
+            uint32_t io; //INPUT / OUTPUT / INPUT_PULLUP 
+            uint32_t it; //GPIO_MODE_XXXX
+        } PinMode;
     #else  
-        uint8_t io; //INPUT / OUTPUT / INPUT_PULLUP 
+        #include "Arduino.h"
+        template<typename Reg, typename Mask> inline bool greg_read(Reg* reg, Mask mask) { return (*reg & mask) != 0; }
+        template<typename Reg, typename Mask> inline void greg_set(Reg* reg, Mask mask) { *reg |= mask; }
+        template<typename Reg, typename Mask> inline void greg_clr(Reg* reg, Mask mask) { *reg &= ~mask;}
+        template<typename Reg, typename Mask> inline void greg_write(Reg* reg, Mask mask, bool val) {
+            if (val) *reg |= mask;
+            else     *reg &= ~mask;
+        }
+        typedef uint8_t Pin;
+        typedef uint8_t PinMode;
     #endif
-    } PinMode;
-
 
 
 #ifndef GIO_LIB_HPP
@@ -303,199 +412,209 @@
         #define __avr_pin_to_bit(P) (((P) <= 7) ? (P) : (P)-8)
         #endif
         #endif
-        _GIO_INLINE void mode(Pin P, PinMode m){
+        _GIO_INLINE void mode(Pin n, PinMode m){
         #if defined(__avr_pin_to_port)
-            if (__builtin_constant_p(P.n) && __builtin_constant_p(V)){
-                switch (V){
+            if (__builtin_constant_p(n) && __builtin_constant_p(m)){
+                switch (m){
                     case INPUT:
-                        bitClear(*__avr_pin_to_ddr(P.n), __avr_pin_to_bit(P.n));
-                        bitClear(*__avr_pin_to_port(P.n), __avr_pin_to_bit(P.n));
+                        bitClear(*__avr_pin_to_ddr(n), __avr_pin_to_bit(n));
+                        bitClear(*__avr_pin_to_port(n), __avr_pin_to_bit(n));
                         break;
                     case INPUT_PULLUP:
-                        bitClear(*__avr_pin_to_ddr(P.n), __avr_pin_to_bit(P.n));
-                        bitSet(*__avr_pin_to_port(P.n), __avr_pin_to_bit(P.n));
+                        bitClear(*__avr_pin_to_ddr(n), __avr_pin_to_bit(n));
+                        bitSet(*__avr_pin_to_port(n), __avr_pin_to_bit(n));
                         break;
                     case OUTPUT:
-                        bitSet(*__avr_pin_to_ddr(P.n), __avr_pin_to_bit(P.n));
+                        bitSet(*__avr_pin_to_ddr(n), __avr_pin_to_bit(n));
                         break;
                 }
             } else
         #endif
             {
-                switch (m.io){
+                switch (m){
                     case INPUT:
-                        greg_clr(portModeRegister(digitalPinToPort(P.n)), digitalPinToBitMask(P.n));
-                        greg_clr(portOutputRegister(digitalPinToPort(P.n)), digitalPinToBitMask(P.n));
+                        greg_clr(portModeRegister(digitalPinToPort(n)), digitalPinToBitMask(n));
+                        greg_clr(portOutputRegister(digitalPinToPort(n)), digitalPinToBitMask(n));
                         break;
                     case INPUT_PULLUP:
-                        greg_clr(portModeRegister(digitalPinToPort(P.n)), digitalPinToBitMask(P.n));
-                        greg_set(portOutputRegister(digitalPinToPort(P.n)), digitalPinToBitMask(P.n));
+                        greg_clr(portModeRegister(digitalPinToPort(n)), digitalPinToBitMask(n));
+                        greg_set(portOutputRegister(digitalPinToPort(n)), digitalPinToBitMask(n));
                         break;
                     case OUTPUT:
-                        greg_set(portModeRegister(digitalPinToPort(P.n)), digitalPinToBitMask(P.n));
+                        greg_set(portModeRegister(digitalPinToPort(n)), digitalPinToBitMask(n));
                         break;
                 }
             }
         }
-        _GIO_INLINE int read(Pin P){ // read
+        _GIO_INLINE int read(Pin n){ // read
         #if defined(__avr_pin_to_pin)
-            if (__builtin_constant_p(P.n)){ return (bitRead(*__avr_pin_to_pin(P.n), __avr_pin_to_bit(P.n))) ? 1 : 0; } else
+            if (__builtin_constant_p(n)){ return (bitRead(*__avr_pin_to_pin(n), __avr_pin_to_bit(n))) ? 1 : 0; } else
         #endif
-            { return greg_read(portInputRegister(digitalPinToPort(P.n)), digitalPinToBitMask(P.n)); }
+            { return greg_read(portInputRegister(digitalPinToPort(n)), digitalPinToBitMask(n)); }
         }
-        _GIO_INLINE void high(Pin P){ // high
+        _GIO_INLINE void high(Pin n){ // high
         #if defined(__avr_pin_to_port)
-            if (__builtin_constant_p(P.n)){ bitSet(*__avr_pin_to_port(P.n), __avr_pin_to_bit(P.n)); } else
+            if (__builtin_constant_p(n)){ bitSet(*__avr_pin_to_port(n), __avr_pin_to_bit(n)); } else
         #endif
-            { greg_set(portOutputRegister(digitalPinToPort(P.n)), digitalPinToBitMask(P.n)); }
+            { greg_set(portOutputRegister(digitalPinToPort(n)), digitalPinToBitMask(n)); }
         }
-        _GIO_INLINE void low(Pin P){ // low
+        _GIO_INLINE void low(Pin n){ // low
         #if defined(__avr_pin_to_port)
-            if (__builtin_constant_p(P.n)){ bitClear(*__avr_pin_to_port(P.n), __avr_pin_to_bit(P.n)); } else
+            if (__builtin_constant_p(n)){ bitClear(*__avr_pin_to_port(n), __avr_pin_to_bit(n)); } else
         #endif
-            { greg_clr(portOutputRegister(digitalPinToPort(P.n)), digitalPinToBitMask(P.n)); }
+            { greg_clr(portOutputRegister(digitalPinToPort(n)), digitalPinToBitMask(n)); }
         }
-        _GIO_INLINE void write(Pin P, int V){ V ? high(P) : low(P); } // write
-        _GIO_INLINE void toggle(Pin P){ // toggle
+        _GIO_INLINE void write(Pin n, int V){ V ? high(n) : low(n); } // write
+        _GIO_INLINE void toggle(Pin n){ // toggle
         #if defined(__avr_pin_to_pin)
-            if (__builtin_constant_p(P.n)){ bitSet(*__avr_pin_to_pin(P.n), __avr_pin_to_bit(P.n));} else
+            if (__builtin_constant_p(n)){ bitSet(*__avr_pin_to_pin(n), __avr_pin_to_bit(n));} else
         #endif
-            { greg_set(portInputRegister(digitalPinToPort(P.n)), digitalPinToBitMask(P.n)); }
+            { greg_set(portInputRegister(digitalPinToPort(n)), digitalPinToBitMask(n)); }
         }
-        _GIO_INLINE void init(Pin P, PinMode m = {INPUT}){  mode(P, m.io); } // init
+        _GIO_INLINE void init(Pin P, PinMode m = {INPUT}){  mode(P, m); } // init
     #elif defined(ESP8266) || defined(ARDUINO_ARCH_ESP8266)
-        _GIO_INLINE void mode(Pin pin, PinMode m){
+        _GIO_INLINE void mode(Pin n, PinMode m){
             // dsnt work
-            // if (m.io == INPUT) GPE &= ~(1 << pin);
-            // else if (m.io == OUTPUT) GPE |= (1 << pin);
-            switch (m.io){
+            // if (m == INPUT) GPE &= ~(1 << pin);
+            // else if (m == OUTPUT) GPE |= (1 << pin);
+            switch (m){
                 case INPUT:
                 case INPUT_PULLUP:
-                    if (pin.n < 16){
-                        GPF(pin.n) = GPFFS(GPFFS_GPIO(pin.n));
-                        GPEC = (1 << pin.n);
-                        GPC(pin.n) = (GPC(pin.n) & (0xF << GPCI)) | (1 << GPCD);
-                        //if (m.io == INPUT_PULLUP) 
-                        GPF(pin.n) |= (1 << GPFPU);
-                    } else if (pin.n == 16){
-                        GPF16 = GP16FFS(GPFFS_GPIO(pin.n));
+                    if (n < 16){
+                        GPF(n) = GPFFS(GPFFS_GPIO(n));
+                        GPEC = (1 << n);
+                        GPC(n) = (GPC(n) & (0xF << GPCI)) | (1 << GPCD);
+                        //if (m == INPUT_PULLUP) 
+                        GPF(n) |= (1 << GPFPU);
+                    } else if (n == 16){
+                        GPF16 = GP16FFS(GPFFS_GPIO(n));
                         GPC16 = 0;
                         GP16E &= ~1;
                     }
                     break;
                 case OUTPUT:
-                    if (pin.n < 16){
-                        GPF(pin.n) = GPFFS(GPFFS_GPIO(pin.n));
-                        GPC(pin.n) = (GPC(pin.n) & (0xF << GPCI));
-                        GPES = (1 << pin.n);
-                    } else if (pin.n == 16){
-                        GPF16 = GP16FFS(GPFFS_GPIO(pin.n));
+                    if (n < 16){
+                        GPF(n) = GPFFS(GPFFS_GPIO(n));
+                        GPC(n) = (GPC(n) & (0xF << GPCI));
+                        GPES = (1 << n);
+                    } else if (n == 16){
+                        GPF16 = GP16FFS(GPFFS_GPIO(n));
                         GPC16 = 0;
                         GP16E |= 1;
                     }
                     break;
 
                 default:
-                    pinMode(pin.n, m.io);
+                    pinMode(n, m);
                     break;
             }
         }
-        _GIO_INLINE int read(Pin pin){ return (pin.n < 16) ? GPIP(pin.n) : (GP16I & 0x01); } // read 
-        _GIO_INLINE void low(Pin pin){ 
-            if (pin.n < 16){GPOC = (1 << pin.n);} else if (pin.n == 16){GP16O &= ~1;} }// low
-        _GIO_INLINE void high(Pin pin){
-            if (pin.n < 16){GPOS = (1 << pin.n);} else if (pin.n == 16){GP16O |= 1;} }// high
-        _GIO_INLINE void write(Pin pin, uint8_t val){ val ? high(pin.n) : low(pin.n); } // write
-        _GIO_INLINE void toggle(Pin pin){
-            if (pin.n < 16){ if (GPIP(pin.n)){GPOC = (1 << pin.n);} else {GPOS = (1 << pin.n);} } 
-            else if (pin.n == 16){ if (GP16I & 0x01){GP16O &= ~1;} else {GP16O |= 1;} } } // toggle
-        _GIO_INLINE void init(Pin P, PinMode m = {INPUT}){ mode(P, m.io); } // init
+        _GIO_INLINE int read(Pin n){ return (n < 16) ? GPIP(n) : (GP16I & 0x01); } // read 
+        _GIO_INLINE void low(Pin n){ 
+            if (n < 16){GPOC = (1 << n);} else if (n == 16){GP16O &= ~1;} }// low
+        _GIO_INLINE void high(Pin n){
+            if (n < 16){GPOS = (1 << n);} else if (n == 16){GP16O |= 1;} }// high
+        _GIO_INLINE void write(Pin n, uint8_t val){ val ? high(n) : low(n); } // write
+        _GIO_INLINE void toggle(Pin n){
+            if (n < 16){ if (GPIP(n)){GPOC = (1 << n);} else {GPOS = (1 << n);} } 
+            else if (n == 16){ if (GP16I & 0x01){GP16O &= ~1;} else {GP16O |= 1;} } } // toggle
+        _GIO_INLINE void init(Pin n, PinMode m = {INPUT}){ mode(n, m); } // init
     #elif defined(ESP32) || defined(ARDUINO_ARCH_ESP32)
         #include <driver/rtc_io.h>
         #include <soc/gpio_struct.h>
         #if ESP_IDF_VERSION_MAJOR < 4
-        #define _ESP32_IDF_V3_REG()                                                                               \
+            #define _ESP32_IDF_V3_REG()                                                                               \
             uint32_t rtc_reg(rtc_gpio_desc[pin].reg);                                                             \
-            if (rtc_reg){                                                                                        \
+            if (rtc_reg) {                                                                                        \
                 ESP_REG(rtc_reg) = ESP_REG(rtc_reg) & ~(rtc_gpio_desc[pin].mux);                                  \
                 ESP_REG(rtc_reg) = ESP_REG(rtc_reg) & ~(rtc_gpio_desc[pin].pullup | rtc_gpio_desc[pin].pulldown); \
             }
         #else
-        #define _ESP32_IDF_V3_REG()
+            #define _ESP32_IDF_V3_REG()
         #endif
         #define _IS_ESP_Cx_ defined(CONFIG_IDF_TARGET_ESP32C3) || defined(CONFIG_IDF_TARGET_ESP32C6)
-        _GIO_INLINE void mode(Pin pin, PinMode m){ // mode
-            switch (m.io){
+        // mode
+        _GIO_INLINE void mode(Pin pin, PinMode mode) {
+            switch (mode) {
                 case INPUT:
-        #if _IS_ESP_Cx_
-                    GPIO.enable_w1tc.val = (1ul << (pin.n));
+                    pin = digitalPinToGPIONumber(pin);
+        #ifdef _IS_ESP_Cx_
+                    GPIO.enable_w1tc.val = (1ul << (pin));
         #else
-                    if (digitalPinIsValid(pin.n)){
+                    if (digitalPinIsValid(pin)) {
                         _ESP32_IDF_V3_REG();
-                        if (pin.n < 32) GPIO.enable_w1tc = (1ul << pin.n);
-                        else GPIO.enable1_w1tc.val = (1ul << (pin.n - 32));
+                        if (pin < 32) GPIO.enable_w1tc = (1ul << pin);
+                        else GPIO.enable1_w1tc.val = (1ul << (pin - 32));
                     }
         #endif
                     break;
+
                 case OUTPUT:
-        #if _IS_ESP_Cx_
-                    GPIO.enable_w1ts.val = (1ul << (pin.n));
+                    pin = digitalPinToGPIONumber(pin);
+        #ifdef _IS_ESP_Cx_
+                    GPIO.enable_w1ts.val = (1ul << (pin));
         #else
-                    if (digitalPinIsValid(pin.n)){
+                    if (digitalPinIsValid(pin)) {
                         _ESP32_IDF_V3_REG();
-                        if (pin.n < 32) GPIO.enable_w1ts = (1ul << pin.n);
-                        else GPIO.enable1_w1ts.val = (1ul << (pin.n - 32));
+                        if (pin < 32) GPIO.enable_w1ts = (1ul << pin);
+                        else GPIO.enable1_w1ts.val = (1ul << (pin - 32));
                     }
         #endif
                     break;
                 default:
-                    pinMode(pin.n, m.io);
+                    pinMode(pin, mode);
                     break;
             }
         }
-        _GIO_INLINE int read(Pin pin.n){ // read
-        #if _IS_ESP_Cx_
-            return (GPIO.in.val >> pin.n) & 0x1;
+
+        
+        _GIO_INLINE int read(Pin pin){ pin = digitalPinToGPIONumber(pin);
+        #ifdef _IS_ESP_Cx_
+            return (GPIO.in.val >> pin) & 0x1;
         #else
-            if (digitalPinIsValid(pin.n)){
-                if (pin.n < 32) return (GPIO.in >> pin.n) & 0x1;
-                else return (GPIO.in1.val >> (pin.n - 32)) & 0x1;
+            if (digitalPinIsValid(pin)) {
+                if (pin < 32) return (GPIO.in >> pin) & 0x1;
+                else return (GPIO.in1.val >> (pin - 32)) & 0x1;
             }
         #endif
             return 0;
-        }
-        _GIO_INLINE void low(Pin pin){ // low
-        #if _IS_ESP_Cx_
-            GPIO.out_w1tc.val = (1ul << pin.n);
+        }// read
+
+        
+        _GIO_INLINE void low(Pin pin){ pin = digitalPinToGPIONumber(pin);
+        #ifdef _IS_ESP_Cx_
+            GPIO.out_w1tc.val = (1ul << pin);
         #else
-            if (digitalPinIsValid(pin.n)){
-                if (pin < 32) GPIO.out_w1tc = (1ul << pin.n);
-                else GPIO.out1_w1tc.val = (1ul << (pin.n - 32));
+            if (digitalPinIsValid(pin)) {
+                if (pin < 32) GPIO.out_w1tc = (1ul << pin);
+                else GPIO.out1_w1tc.val = (1ul << (pin - 32));
             }
         #endif
-        }
-        _GIO_INLINE void high(Pin pin){ // high
-        #if _IS_ESP_Cx_
-            GPIO.out_w1ts.val = (1ul << pin.n);
+        }// low
+
+        
+        _GIO_INLINE void high(Pin pin){ pin = digitalPinToGPIONumber(pin);
+        #ifdef _IS_ESP_Cx_
+            GPIO.out_w1ts.val = (1ul << pin);
         #else
-            if (digitalPinIsValid(pin.n)){
-                if (pin.n < 32) GPIO.out_w1ts = (1ul << pin.n);
-                else GPIO.out1_w1ts.val = (1ul << (pin.n - 32));
+            if (digitalPinIsValid(pin)) {
+                if (pin < 32) GPIO.out_w1ts = (1ul << pin);
+                else GPIO.out1_w1ts.val = (1ul << (pin - 32));
             }
         #endif
-        }
-        _GIO_INLINE void write(Pin P, uint8_t val){ val ? high(P.n) : low(P.n); } // write
-        _GIO_INLINE void toggle(Pin P){  write(P, !read(P.n)); }  // toggle
-        _GIO_INLINE void init(Pin P, PinMode m = {INPUT}){ pinMode(P.n, m.io); } // init
+        }// high
+        _GIO_INLINE void write(Pin pin, uint8_t val) { val ? high(pin) : low(pin); }// write
+        _GIO_INLINE void toggle(Pin pin){  write(pin, !read(pin)); }// toggle
+        _GIO_INLINE void init(Pin pin, PinMode V = INPUT){ pinMode(pin, V); }// init
     #elif defined(ARDUINO)//use Arduino
         #include <Arduino.h>
-        _GIO_INLINE void mode(Pin P, PinMode m){ pinMode(P.n, m.io); } // mode
-        _GIO_INLINE int read(Pin P){ return digitalRead(P.n); } // read
-        _GIO_INLINE void high(Pin P){ digitalWrite(P.n, 1);   } // high
-        _GIO_INLINE void low(Pin P){ digitalWrite(P.n, 0);    } // low
-        _GIO_INLINE void write(Pin P, int V){ digitalWrite(P.n, V); }// write
-        _GIO_INLINE void toggle(Pin P){ digitalWrite(P.n, !digitalRead(P.n)); }// toggle
-        _GIO_INLINE void init(Pin P, PinMode m = {INPUT}){ mode(P.n, m); } // init
+        _GIO_INLINE void mode(Pin n, PinMode m){ pinMode(n, m); } // mode
+        _GIO_INLINE int read(Pin n){ return digitalRead(n); } // read
+        _GIO_INLINE void high(Pin n){ digitalWrite(n, 1);   } // high
+        _GIO_INLINE void low(Pin n){ digitalWrite(n, 0);    } // low
+        _GIO_INLINE void write(Pin n, int V){ digitalWrite(n, V); }// write
+        _GIO_INLINE void toggle(Pin n){ digitalWrite(n, !digitalRead(n)); }// toggle
+        _GIO_INLINE void init(Pin n, PinMode m = {INPUT}){ mode(n, m); } // init
     #elif defined(STM32) //if defined(__AVR__) || defined(ARDUINO_ARCH_AVR)        
         _GIO_INLINE void mode(Pin P, PinMode m){
             GPIO_InitTypeDef GPIO_InitStruct = {0};
@@ -505,90 +624,109 @@
             GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
             HAL_GPIO_Init(P.gpio(), &GPIO_InitStruct);
         } //default HAL functions to works with pins
-        _GIO_INLINE bool read(Pin P){ return P.gpio()->IDR & P.n;} 
-        _GIO_INLINE void high(Pin P){ P.gpio()->BSRR = P.n;      }
-        _GIO_INLINE void low(Pin P) { P.gpio()->BRR = P.n;       }
+        _GIO_INLINE bool read(Pin P)   { return P.gpio()->IDR & P.n;} 
+        _GIO_INLINE void high(Pin P)   { P.gpio()->BSRR = P.n;      }
+        _GIO_INLINE void low(Pin P)    { P.gpio()->BRR = P.n;       }
         _GIO_INLINE void write(Pin P, bool val){ val ? high(P):low(P);}
         _GIO_INLINE void toggle(Pin P) { HAL_GPIO_TogglePin(P.gpio(), P.n);}
         _GIO_INLINE void init(Pin P, PinMode m = {GPIO_PULLUP, GPIO_MODE_IT_RISING_FALLING}){ mode(P, m); }
     #endif //STM32
-        template <Pin pin>        
+    #if __cplusplus >= 202002L
+        template <Pin pin> 
         class PinT {
             public:
-                PinT(PinMode mode = {INPUT_PULLUP}){          gio::init(pin, mode); }
+                PinT(PinMode mode = {INPUT_PULLUP}){ gio::init(pin, mode); }
                 _GIO_INLINE void mode(PinMode mode){ gio::mode(pin, mode); }
                 _GIO_INLINE void write(uint8_t val){ gio::write(pin, val); }
-                _GIO_INLINE void high(){             gio::high(pin);         }
-                _GIO_INLINE void low(){              gio::low(pin);          }
-                _GIO_INLINE void toggle(){           gio::toggle(pin);       }
-                _GIO_INLINE int  read(){      return gio::read(pin);         }
+                _GIO_INLINE void high(){             gio::high(pin);       }
+                _GIO_INLINE void low(){              gio::low(pin);        }
+                _GIO_INLINE void toggle(){           gio::toggle(pin);     }
+                _GIO_INLINE int  read(){      return gio::read(pin);       }
+        };    
+    #else
+        template <uint8_t P>
+        class PinT {
+        public:
+            PinT(PinMode mode = {INPUT_PULLUP}) { 
+                Pin pin{P}; 
+                gio::init(pin, mode); 
+            }
+            _GIO_INLINE void mode(PinMode mode){ Pin pin{P}; gio::mode(pin, mode); }
+            _GIO_INLINE void write(uint8_t val){ Pin pin{P}; gio::write(pin, val); }
+            _GIO_INLINE void high(){ Pin pin{P}; gio::high(pin); }
+            _GIO_INLINE void low(){ Pin pin{P}; gio::low(pin); }
+            _GIO_INLINE void toggle(){ Pin pin{P}; gio::toggle(pin); }
+            _GIO_INLINE int read(){ Pin pin{P}; return gio::read(pin); }
         };
-        // class PinIO {
-        // public:
-        //     PinIO(){}
-        //     PinIO(Pin pin, uint8_t mode = INPUT){ init(pin, mode); }
-        //     void init(Pin npin, uint8_t mode = INPUT){ 
-        //         gio::init(npin, mode);
-        //     #if defined(__AVR__) && !defined(GIO_NO_MASK)
-        //         if (mode == OUTPUT) reg = portOutputRegister(digitalPinToPort(npin.n));
-        //         else reg = portInputRegister(digitalPinToPort(npin.n));
-        //         mask = digitalPinToBitMask(npin.n);
-        //     #else
-        //         pin = npin;
-        //     #endif
-        //     }
-        //     void write(int val){
-        //     #if defined(__AVR__) && !defined(GIO_NO_MASK)
-        //         greg_write(reg, mask, val);
-        //     #else
-        //         gio::write(pin, val);
-        //     #endif
-        //     }
-        //     void high(){
-        //     #if defined(__AVR__) && !defined(GIO_NO_MASK)
-        //         greg_set(reg, mask);
-        //     #else
-        //         gio::high(pin);
-        //     #endif
-        //     }
-        //     void low(){
-        //     #if defined(__AVR__) && !defined(GIO_NO_MASK)
-        //         greg_clr(reg, mask);
-        //     #else
-        //         gio::low(pin);
-        //     #endif
-        //     }
-        //     void toggle(){
-        //     #if defined(__AVR__) && !defined(GIO_NO_MASK)
-        //         *reg ^= mask;
-        //     #else
-        //         gio::toggle(pin);
-        //     #endif
-        //     }
-        //     int read(){
-        //     #if defined(__AVR__) && !defined(GIO_NO_MASK)
-        //         return greg_read(reg, mask);
-        //     #else
-        //         return gio::read(pin);
-        //     #endif
-        //     }
-        //     bool valid(){
-        //     #if defined(__AVR__) && !defined(GIO_NO_MASK)
-        //         return reg;
-        //     #else
-        //         return pin.port != nullptr;
-        //     #endif
-        //     }
-        // private:
-        //     #if defined(__AVR__) && !defined(GIO_NO_MASK)
-        //         volatile uint8_t *reg = nullptr;
-        //         uint8_t mask = 0xff;
-        //     #elif defined(STM32)
-        //         Pin pin{nullptr, 0};
-        //     #else
-        //         Pin pin{0xff};
-        //     #endif
-        // };
+    #endif    
+        class PinIO {
+        public:
+            PinIO(){}
+            PinIO(Pin pin, PinMode mode = {INPUT}){ init(pin, mode); }
+            void init(Pin npin, PinMode mode = {INPUT}){ 
+                gio::init(npin, mode);
+            #if defined(__AVR__) && !defined(GIO_NO_MASK)
+                if (mode == OUTPUT) reg = portOutputRegister(digitalPinToPort(npin));
+                else reg = portInputRegister(digitalPinToPort(npin));
+                mask = digitalPinToBitMask(npin);
+            #else
+                pin = npin;
+            #endif
+            }
+            void write(int val){
+            #if defined(__AVR__) && !defined(GIO_NO_MASK)
+                greg_write(reg, mask, val);
+            #else
+                gio::write(pin, val);
+            #endif
+            }
+            void high(){
+            #if defined(__AVR__) && !defined(GIO_NO_MASK)
+                greg_set(reg, mask);
+            #else
+                gio::high(pin);
+            #endif
+            }
+            void low(){
+            #if defined(__AVR__) && !defined(GIO_NO_MASK)
+                greg_clr(reg, mask);
+            #else
+                gio::low(pin);
+            #endif
+            }
+            void toggle(){
+            #if defined(__AVR__) && !defined(GIO_NO_MASK)
+                *reg ^= mask;
+            #else
+                gio::toggle(pin);
+            #endif
+            }
+            int read(){
+            #if defined(__AVR__) && !defined(GIO_NO_MASK)
+                return greg_read(reg, mask);
+            #else
+                return gio::read(pin);
+            #endif
+            }
+            bool valid(){
+            #if defined(__AVR__) && !defined(GIO_NO_MASK)
+                return reg;
+            #elif defined(STM32)
+                return pin.isValid();
+            #else
+                return pin != 0xff;
+            #endif
+            }
+        private:
+            #if defined(__AVR__) && !defined(GIO_NO_MASK)
+                volatile uint8_t *reg = nullptr;
+                uint8_t mask = 0xff;
+            #elif defined(STM32)
+                Pin pin{nullptr, 0};
+            #else
+                Pin pin{0xff};
+            #endif
+        };
     #ifdef GIO_WITH_SHIFT_HPP
         #ifdef STM32
         static void delayMicroseconds(uint32_t us) { //NOT PRECISE
@@ -1097,7 +1235,7 @@ class VirtButton { // базовый класс кнопки
 #ifdef STM32  //btn doesn't work if mode = INPUT_PULLDOWN && btnLevel = LOW, btn.read() works, but flags not
         return btnLevel==AUTO?(mode.io==INPUT_PULLUP?LOW:(mode.io==INPUT_PULLDOWN?HIGH:LOW)):LOW;
 #else
-        return btnLevel
+        return btnLevel;
 #endif
     }
 #ifndef EB_NO_CALLBACK
@@ -1207,7 +1345,8 @@ constexpr uint8_t EB_DIR = (1 << 4);
 constexpr uint8_t EB_ETRN_R = (1 << 5);
 constexpr uint8_t EB_ISR_F = (1 << 6);
 constexpr uint8_t EB_EISR = (1 << 7);
-constexpr uint16_t faststeps[] = {1, 10, 100, 1000, 10000,50000};
+
+constexpr uint16_t faststeps[] = FASTSTEPS;
 /** @class VirtEncoder
  *  @brief Base class for a rotary encoder.
  *  Provides polling, methods and interrupt-based reading of a rotary encoder. */
@@ -1408,7 +1547,7 @@ class VirtEncButton : public VirtButton, public VirtEncoder {
     /** @brief Check if encoder was turned to the left while pressed.  @return true if turned left with button pressed [event]. */
     bool leftH()        { return !ef.read(EB_DIR) && turnH();                       } // нажатый поворот налево [событие]
     /** @brief Check if encoder button is being held (analog to pressing()). @return true if button is pressed [state]. */
-    bool encHolding()   { return bf.read(EB_EHLD);                                  } // нажата кнопка энкодера. Аналог pressing() [состояние]
+    bool Hold()         { return bf.read(EB_EHLD);                                  } // нажата кнопка энкодера. Аналог pressing() [состояние]
     /** @brief Get the action from the encoder or button. @return Event code for turn or button [event]. */
     uint16_t action()   { return turn() ? EB_TURN : VirtButton::action();             } // было действие с кнопки или энкодера, вернёт код события [событие]
     /** @brief Get the action as EBAction type. @return Event code for turn or button [event]. */
@@ -1695,20 +1834,31 @@ class EncButton : public VirtEncButton {
         Pin e0, e1, b;
 };
 
-template <Pin PIN>//TEMPLATE PIN
+
+
+#if __cplusplus >= 202002L
+    template <Pin BTN>//TEMPLATE PIN
+#else
+    template <uint8_t BTN>
+#endif
 class ButtonT : public VirtButton {
    public:
     ButtonT() {}
     ButtonT(PinMode mode, uint8_t btnLevel = AUTO){ init(mode, btnLevel); }    
     void init(PinMode mode, uint8_t btnLevel = AUTO){ // указать режим работы пина
-        EB_mode(PIN, mode);
+        EB_mode(BTN, mode);
         setBtnLevel(levelAuto(btnLevel,mode));
     }
-    bool read(){ return EB_read(PIN) ^ bf.read(EB_INV); } // прочитать текущее значение кнопки (без дебаунса)
-    bool tick(){ return VirtButton::tick(EB_read(PIN)); } // функция обработки, вызывать в loop
-    bool tickRaw(){ return VirtButton::tickRaw(EB_read(PIN)); } // обработка кнопки без сброса событий и вызова коллбэка
+    bool read(){ return EB_read(BTN) ^ bf.read(EB_INV); } // прочитать текущее значение кнопки (без дебаунса)
+    bool tick(){ return VirtButton::tick(EB_read(BTN)); } // функция обработки, вызывать в loop
+    bool tickRaw(){ return VirtButton::tickRaw(EB_read(BTN)); } // обработка кнопки без сброса событий и вызова коллбэка
 };  
-template <Pin ENCA, Pin ENCB>
+
+#if __cplusplus >= 202002L
+    template <Pin ENCA, Pin ENCB>
+#else
+    template <uint8_t ENCA, uint8_t ENCB>
+#endif
 class EncoderT : public VirtEncoder {
    public:
     EncoderT() {}
@@ -1724,7 +1874,12 @@ class EncoderT : public VirtEncoder {
     int8_t tick(){ return ef.read(EB_EISR)?VirtEncoder::tick():VirtEncoder::tick(EB_read(ENCA),EB_read(ENCB)); } // LOOP ONLY
     int8_t tickRaw(){ return ef.read(EB_EISR)?VirtEncoder::tickRaw():VirtEncoder::tickRaw(EB_read(ENCA),EB_read(ENCB)); } // NO EVENT RESET
 };
-template <Pin ENCA, Pin ENCB, Pin BTN, PinMode MENC, PinMode MBTN>
+
+#if __cplusplus >= 202002L
+    template <Pin ENCA, Pin ENCB, Pin BTN, PinMode MENC, PinMode MBTN>
+#else
+    template <uint8_t ENCA, uint8_t ENCB, uint8_t BTN, uint8_t MENC = INPUT, uint8_t MBTN = INPUT_PULLUP>
+#endif
 class EncButtonT : public VirtEncButton {
    public:
     EncButtonT(uint8_t btnLevel = AUTO){
@@ -1732,7 +1887,7 @@ class EncButtonT : public VirtEncButton {
     } // настроить пины (энк, энк, кнопка, pinmode энк, pinmode кнопка)
     void init(uint8_t btnLevel = AUTO){// настроить пины (pinmode энк, pinmode кнопка)
         EB_mode(ENCA, MENC);
-        EB_mode(ENCB, MENC );
+        EB_mode(ENCB, MENC);
         EB_mode(BTN,  MBTN);
         setBtnLevel(btnLevel);
         initEnc(EB_read(ENCA), EB_read(ENCB));
@@ -1744,5 +1899,4 @@ class EncButtonT : public VirtEncButton {
     // ====================== READ ======================
     bool readBtn(){ return EB_read(BTN) ^ bf.read(EB_INV); } // прочитать значение кнопки
 };
-
 #endif //LIBBENC_HPP
